@@ -1,0 +1,270 @@
+---
+title: "Final Project"
+author: "Travis Froberg"
+date: "10/15/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown: Collinearity and Variable Selection
+
+```{r}
+library(car)
+library(nortest)
+library('olsrr')
+library(MASS)
+library(plyr)
+library(leaps)
+library(tweedie)
+library(statmod)
+library(aTSA)
+```
+
+```{r}
+setwd("C:\\Users\\malin\\Documents\\GLM Class - MTU")
+LoanData <- read.csv("IBRD_Loan_Data.csv")
+attach(LoanData)
+LoanData <- data.frame(
+                       LoanData$Disbursed.Amount,
+                       LoanData$Sold.3rd.Party,
+                       LoanData$Region,
+                       LoanData$Loan.Status,
+                       Original.Principal.Amount,
+                       Borrower.s.Obligation,
+                       Cancelled.Amount,
+                       LoanData$Interest.Rate
+)
+LoanData <- na.omit(LoanData)
+# str(LoanData)
+colnames(LoanData) <- c("Disbursed_Amount", "Sold_3rd_Party", "Region",
+                        "Loan_Status", "Original_Principal_Amount",
+                        "Borrowers_Obligation", "Cancelled_Amount", "Interest_Rate")
+# attach(LoanData)
+LoanData$Disbursed_Amount <- LoanData$Disbursed_Amount/1000000
+LoanData$Sold_3rd_Party <- LoanData$Sold_3rd_Party/1000000
+LoanData$Original_Principal_Amount <- LoanData$Original_Principal_Amount/1000000
+LoanData$Borrowers_Obligation <- LoanData$Borrowers_Obligation/1000000
+LoanData$Cancelled_Amount <- LoanData$Cancelled_Amount/1000000
+LoanData$Interest_Rate <- LoanData$Interest_Rate/1000000
+LoanData$Region <- as.factor(LoanData$Region)
+LoanData$Loan_Status <- as.factor(LoanData$Loan_Status)
+
+# levels(LoanData2$Region)
+levels(LoanData2$Loan_Status)
+LoanData$Region <- recode(LoanData$Region, "c('AFRICA EAST', 'AFRICA WEST') = 'East_and_West_Africa'")
+LoanData$Region <- recode(LoanData$Region, "c('EUROPE AND CENTRAL ASIA', 'MIDDLE EAST AND NORTH AFRICA', 'SOUTH ASIA') = 'EUROPE, MIDDLE EAST, NORTH AFRICA, AND CENTRAL AND SOUTH ASIA'")
+# levels(X3)
+### LoanData2 <- subset(LoanData, LoanData$Region!="SOUTH ASIA" & LoanData$Region!="MIDDLE EAST AND NORTH AFRICA" & LoanData$Region!="OTHER" & LoanData$Region!="EAST ASIA AND PACIFIC" )
+# View(LoanData2)
+LoanData2 <- LoanData
+LoanData2$Region <- as.factor(LoanData2$Region)
+# levels(LoanData2$X3)
+
+# attach(LoanData2)
+LoanData2$Loan_Status <- as.factor(LoanData2$Loan_Status)
+
+LoanData2$Loan_Status <- recode(LoanData2$Loan_Status, "c('Approved', 'Disbursing', 'Disbursing&Repaying', 'Effective', 'Fully Disbursed', 'Fully Transferred', 'Repaying', 'Signed') = 'Active_(not_fully_repaid_or_cancelled)'")
+LoanData2$Loan_Status <- recode(LoanData2$Loan_Status, "c('Fully Cancelled', 'Terminated') = 'Cancelled'")
+
+LoanData2$Region <- relevel(LoanData2$Region, ref = 'EUROPE, MIDDLE EAST, NORTH AFRICA, AND CENTRAL AND SOUTH ASIA')
+
+LoanData2$Loan_Status <- relevel(LoanData2$Loan_Status, ref = 'Cancelled')
+
+LoanData2$Region <- factor(LoanData2$Region)
+LoanData2$Region <- (LoanData2$Region)
+LoanData2$Loan_Status <- factor(LoanData2$Loan_Status)
+levels(LoanData2$Region)
+# View(LoanData2)
+table(LoanData2$Region)
+```
+```{r}
+plot(LoanData2$Interest_Rate)
+range(LoanData2$Interest_Rate)
+densityPlot(LoanData2$Interest_Rate)
+mean(LoanData2$Interest_Rate)
+mean(LoanData2$Interest_Rate)^2
+mean(LoanData2$Interest_Rate)^3
+var(LoanData2$Interest_Rate)
+
+# Best so Far 
+mean(LoanData2$Interest_Rate)^1.1
+mean(LoanData2$Interest_Rate)^1.268137
+mean(LoanData2$Interest_Rate)*(1-mean(LoanData2$Interest_Rate))
+```
+
+```{r}
+scatterplotMatrix(~ Interest_Rate+ Disbursed_Amount + Cancelled_Amount + Original_Principal_Amount, LoanData2, smooth = FALSE )
+boxplot(LoanData3$Interest_Rate~LoanData2$Region)
+boxplot(LoanData3$Interest_Rate~LoanData2$Loan_Status, xlab = "Loan Status", ylab = "Interest Rate")
+plot(LoanData2$Interest_Rate, ylab = "Interest Rate")
+```
+# Summary of Possible Collinearity 
+As can be seen in the scatterplot above, X1 and X5, X1 and X6, and X5 and X6 all showed an obvious linear trend in their relations. This is expected because all three of these variables are measuring similar things. X1 is the amount of the loan that has been disbursed to a particular country, X5 is the principal amount of the original loan, and X6 is the amount the borrowing company still owes. 
+
+It makes sense that a higher original loan amount (X5) corresponds to a higher disbursed amount (X1) of the loan. And a higher disbursed amount (X1) would correspond with a higher amount still owed (X6). 
+
+# Estimation of Index Parameter
+
+```{r}
+out <- tweedie.profile(Interest_Rate ~ Region, do.plot=TRUE, data =LoanData2, xi.vec = seq(1.02, 1.4, length = 19))
+out$xi.max
+```
+
+```{r}
+# profile likelihood 
+xi.est <- out$xi.max # estimated index parameter
+out$ci # ci of index parameter
+out$phi.max # dispersion parameter
+```
+
+# GLM Models 
+```{r}
+mod1 <- glm(Interest_Rate ~ Disbursed_Amount + 
+                       # Original_Principal_Amount + 
+                       # Borrowers_Obligation +
+                        Cancelled_Amount +
+                       # Sold_3rd_Party + 
+                        Region +
+                        Loan_Status,
+                        data = LoanData2, 
+   family = tweedie(var.power = xi.est , link.power = 0))
+printCoefmat(coef(summary(mod1)))
+summary(mod1)
+# adf.test(mod1)
+# levels(LoanData2$Region)
+```
+```{r}
+# Model with the variable Borrowers Obligation. 
+mod1.1 <- glm(Interest_Rate ~ Disbursed_Amount + 
+                         Original_Principal_Amount + 
+                       # Borrowers_Obligation +
+                        Cancelled_Amount +
+                       # Sold_3rd_Party + 
+                        Region +
+                        Loan_Status,
+                        data = LoanData2, 
+   family = tweedie(var.power = xi.est , link.power = 0))
+printCoefmat(coef(summary(mod1.1)))
+summary(mod1.1)
+```
+```{r}
+# perform the F-test
+dev2 <- deviance(mod1) - deviance(mod1.1)
+df1 <- df.residual(mod1) - df.residual(mod1.1)
+df2 <- df.residual(mod1.1)
+f <- dev2 / df1 / summary(mod1.1)$dispersion
+p.value <- 1 - pf(f, df1 = df1, df2 = df2)
+c(f = f, p = p.value, df1 = df1, df2 = df2) 
+```
+
+```{r}
+# Model without the variable Cancelled Amount 
+mod1.2 <- glm(Interest_Rate ~ Disbursed_Amount + 
+                         Original_Principal_Amount + 
+                       # Borrowers_Obligation +
+                       # Cancelled_Amount +
+                       # Sold_3rd_Party + 
+                        Region +
+                        Loan_Status,
+                        data = LoanData2, 
+   family = tweedie(var.power = xi.est , link.power = 0))
+printCoefmat(coef(summary(mod1.2)))
+summary(mod1.2)
+```
+```{r}
+# perform the F-test
+dev2 <- deviance(mod1.2) - deviance(mod1.1)
+df1 <- df.residual(mod1.2) - df.residual(mod1.1)
+df2 <- df.residual(mod1.1)
+f <- dev2 / df1 / summary(mod1.1)$dispersion
+p.value <- 1 - pf(f, df1 = df1, df2 = df2)
+c(f = f, p = p.value, df1 = df1, df2 = df2) 
+```
+```{r}
+# Model without Cancelled Amount and with Original Principal Amount 
+mod1.3 <- glm(Interest_Rate ~ Disbursed_Amount + 
+                         Original_Principal_Amount + 
+                       # Borrowers_Obligation +
+                       # Cancelled_Amount +
+                       # Sold_3rd_Party + 
+                        Region +
+                        Loan_Status,
+                        data = LoanData2, 
+   family = tweedie(var.power = xi.est , link.power = 0))
+printCoefmat(coef(summary(mod1.3)))
+summary(mod1.3)
+# adf.test(mod1)
+# levels(LoanData2$Region)
+```
+```{r}
+# diagnostic plots 
+rQ <- qresid(mod1.3) # quantile residual
+mu <- fitted(mod1.3) # fitted values
+lp <- predict(mod1.3, type = "link") # linear predictor
+z <- resid(mod1.3, type = "working") + lp # working response
+rP <- resid(mod1.3, type = "partial") # partial residuals
+# (3): plot of quantile residuals against transformed mu
+par(mfrow = c(2, 3))
+scatter.smooth(rQ ~ mu^(2-xi.est)/2, las = 1, ylab = "Quantile Residuals", 
+   xlab = "Fitted Values (Transformed)")
+  # main = "A: Quantile Residuals vs Fitted Values")
+# (3): plot of working response against linear predictor
+scatter.smooth(z ~ lp, las = 1, ylab = "Working Responses", 
+   xlab = "Linear Predictors") 
+   # main = "C: Working Responses vs Linear Predictors")
+# (3): Q-Q plot of quantile residuals
+qqnorm(rQ, las = 1, main = "E: Q-Q plot")
+qqline(rQ)
+# (3): outliers and influential observations
+sort(rQ)
+cD <- cooks.distance(mod1.3)
+plot(sort(cD), ylab = "Cook's Distance")
+
+# 
+# plot(cD ~ turbines$Hours, las = 1, 
+#    ylab = "Cook's Distance", xlab = "Hours", 
+#    main = "F: Cook's Distance\n vs Covatiate Hours")
+# maxrq <- which.max(abs(rQ))
+# maxd <- which.max(cD)
+# points( x = turbines$Hours[maxrq], y = cD[maxrq], col = 3, pch = 16) 
+# points( x = turbines$Hours[maxd], y = cD[maxd], col = 4, pch = 16)
+
+```
+
+```{r}
+mod2.loan <- glm(Interest_Rate ~ 
+                        Borrowers_Obligation +
+                        Sold_3rd_Party + 
+                        Region +
+                        Loan_Status +
+                         + Cancelled_Amount, data = LoanData2, 
+                         family = inverse.gaussian)# (link = "log") )
+printCoefmat(coef(summary(mod2.loan)))
+```
+
+```{r}
+mod3.loan <- glm(Interest_Rate ~ Disbursed_Amount +
+                        # Original_Principal_Amount * 
+                       #  Borrowers_Obligation +
+                       #  Sold_3rd_Party + 
+                        Region +
+                        Loan_Status +
+                         + Cancelled_Amount, data = LoanData2, 
+   family = binomial(link = "logit"))
+summary(mod3.loan)
+```
+
+```{r}
+mod4.loan <- glm(Interest_Rate ~ Disbursed_Amount * Original_Principal_Amount * 
+                        Borrowers_Obligation +
+                        Sold_3rd_Party + 
+                        Region +
+                        Loan_Status +
+                         + Cancelled_Amount, data = LoanData2, 
+   family = poisson(link = "log"))
+summary(mod4.loan)
+```
+
